@@ -42,7 +42,7 @@ jobs:
       - name: Create ZIP package
         run: |
           cd output
-          zip -r "../Lockpick_RCM-${{ steps.version.outputs.version }}.zip" .
+          zip -r "../DowngradeFixer-${{ steps.version.outputs.version }}.zip" .
           cd ..
 
       - name: Tag and push
@@ -54,31 +54,34 @@ jobs:
           git tag "$version"
           git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git "$version"
 
-      - name: Get latest commit message
-        id: changelog
-        run: |
-          message=$(git log -1 --pretty=%B)
-          echo "message<<EOF" >> $GITHUB_OUTPUT
-          echo "$message" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
-          name: Release ${{ steps.version.outputs.version }}
+          name: DowngradeFixer ${{ steps.version.outputs.version }}
           body: |
-            Changelog:
+            ## Initial Release
 
-            ${{ steps.changelog.outputs.message }}
+            DowngradeFixer is a streamlined bare-metal payload that automates the essential steps needed after downgrading Nintendo Switch firmware:
+
+            - **Dumps prod.keys** - Extracts encryption keys for homebrew tools
+            - **Deletes problematic save file** - Removes `8000000000000073` from SYSTEM partition that causes issues after downgrading
+
+            ### Usage
+            1. Place Minerva at `/bootloader/sys/libsys_minerva.bso` (optional, for better performance)
+            2. Launch `DowngradeFixer.bin` via payload injector
+            3. Select Fix SysNAND, EmuNAND, or Both
+            4. Reboot when complete
+
+            Use this tool when experiencing boot issues or system instability after downgrading firmware.
           files: |
-            output/Lockpick_RCM.bin
-            Lockpick_RCM-${{ steps.version.outputs.version }}.zip
+            output/DowngradeFixer.bin
+            DowngradeFixer-${{ steps.version.outputs.version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload compiled ZIP as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Lockpick_RCM-${{ steps.version.outputs.version }}.zip
-          path: Lockpick_RCM-${{ steps.version.outputs.version }}.zip
+          name: DowngradeFixer-${{ steps.version.outputs.version }}.zip
+          path: DowngradeFixer-${{ steps.version.outputs.version }}.zip
