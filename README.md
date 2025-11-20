@@ -1,5 +1,9 @@
 # DowngradeFixer
 
+<p align="center">
+  <img src="images/preview.bmp" alt="DowngradeFixer Preview" style="width:65%">
+</p>
+
 DowngradeFixer is a streamlined bare-metal payload designed to fix issues encountered when downgrading Nintendo Switch firmware. It performs two critical operations without booting into Horizon OS.
 
 > **Based on** [Lockpick_RCM_Pro](https://github.com/sthetixofficial/Lockpick_RCM_Pro) by sthetixofficial
@@ -82,7 +86,7 @@ DowngradeFixer is licensed under the **GPLv2**. The save processing module is ad
 ## Credits and Attribution
 
 This project is a streamlined version built upon:
-- **[sthetixofficial](https://github.com/sthetix/Lockpick_RCM_Pro)** - Lockpick_RCM_Pro
+- **[sthetix](https://github.com/sthetix/Lockpick_RCM_Pro)** - Lockpick_RCM_Pro
 - **[THZoria](https://github.com/THZoria/Lockpick_RCMaster)** - Lockpick_RCMaster base
 - **[shchmue](https://github.com/shchmue)** - Original Lockpick_RCM
 - **[CTCaer](https://github.com/CTCaer/hekate)** - Hekate bootloader and libraries
