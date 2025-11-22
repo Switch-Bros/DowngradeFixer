@@ -4,7 +4,7 @@
   <img src="images/preview.bmp" alt="DowngradeFixer Preview" style="width:65%">
 </p>
 
-DowngradeFixer is a streamlined bare-metal payload designed to fix issues encountered when downgrading Nintendo Switch firmware. It performs two critical operations without booting into Horizon OS.
+DowngradeFixer is a streamlined bare-metal payload designed to fix issues encountered when downgrading Nintendo Switch firmware from 21.0.0 to 20.5.0. It performs two critical operations without booting into Horizon OS.
 
 > **Based on** [Lockpick_RCM_Pro](https://github.com/sthetixofficial/Lockpick_RCM_Pro) by sthetixofficial
 > **Originally based on** [Lockpick_RCMaster](https://github.com/THZoria/Lockpick_RCMaster) by THZoria
