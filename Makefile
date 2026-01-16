@@ -62,7 +62,7 @@ TOOLS := $(TOOLSLZ) $(TOOLSB2C)
 
 ################################################################################
 
-.PHONY: all clean $(LDRDIR) $(TOOLS)
+.PHONY: all clean release $(LDRDIR) $(TOOLS)
 
 all: $(OUTPUTDIR)/$(TARGET).bin $(LDRDIR)
 	@echo "--------------------------------------"
@@ -76,6 +76,17 @@ all: $(OUTPUTDIR)/$(TARGET).bin $(LDRDIR)
 	@echo $(BIN_SIZE)" Bytes"
 	@echo "Payload Max:  126296 Bytes"
 	@if [ ${BIN_SIZE} -gt 126296 ]; then echo "\e[1;33mPayload size exceeds limit!\e[0m"; fi
+	@echo "--------------------------------------"
+
+release: $(OUTPUTDIR)/$(TARGET).bin
+	@echo "--------------------------------------"
+	@echo "Creating release zip..."
+	@rm -rf $(OUTPUTDIR)/zip_temp
+	@mkdir -p $(OUTPUTDIR)/zip_temp/bootloader/payloads
+	@cp $(OUTPUTDIR)/$(TARGET).bin $(OUTPUTDIR)/zip_temp/bootloader/payloads/$(TARGET).bin
+	@cd $(OUTPUTDIR)/zip_temp && zip -r ../$(TARGET)-$(LPVERSION_MAJOR).$(LPVERSION_MINOR).$(LPVERSION_BUGFX).zip .
+	@rm -rf $(OUTPUTDIR)/zip_temp
+	@echo "Created: $(OUTPUTDIR)/$(TARGET)-$(LPVERSION_MAJOR).$(LPVERSION_MINOR).$(LPVERSION_BUGFX).zip"
 	@echo "--------------------------------------"
 
 clean: $(TOOLS)
@@ -94,7 +105,7 @@ $(LDRDIR): $(OUTPUTDIR)/$(TARGET).bin
 	@$(MAKE) --no-print-directory -C $@ $(MAKECMDGOALS) -$(MAKEFLAGS) PAYLOAD_NAME=$(TARGET)
 
 $(TOOLS):
-	@$(MAKE) --no-print-directory -C $@ $(MAKECMDGOALS) -$(MAKEFLAGS)
+	@$(MAKE) --no-print-directory -C $@ $(if $(filter clean,$(MAKECMDGOALS)),clean,) -$(MAKEFLAGS)
 
 $(OUTPUTDIR)/$(TARGET).bin: $(BUILDDIR)/$(TARGET)/$(TARGET).elf $(TOOLS)
 	@mkdir -p "$(@D)"
