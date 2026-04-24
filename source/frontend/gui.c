@@ -25,24 +25,31 @@
 
 int save_fb_to_bmp()
 {
-	// Disallow screenshots if less than 2s passed.
 	static u32 timer = 0;
 	if (get_tmr_ms() < timer)
 		return 1;
 
-	const u32 file_size = 0x384000 + 0x36;
+	const u32 bmp_width = 1280;
+	const u32 bmp_height = 720;
+	const u32 pixel_data_size = bmp_width * bmp_height * 4;
+	const u32 file_size = pixel_data_size + 0x36;
 	u8 *bitmap = malloc(file_size);
-	u32 *fb = malloc(0x384000);
+	u32 *fb = malloc(pixel_data_size);
 	u32 *fb_ptr = gfx_ctxt.fb;
-
-	// Reconstruct FB for bottom-top, portrait bmp.
-	for (int y = 1279; y > -1; y--)
+	if (!bitmap || !fb)
 	{
-		for (u32 x = 0; x < 720; x++)
-			fb[y * 720 + x] = *fb_ptr++;
+		free(bitmap);
+		free(fb);
+		return 1;
 	}
 
-	memcpy(bitmap + 0x36, fb, 0x384000);
+	for (int y = bmp_height - 1; y >= 0; y--)
+	{
+		for (u32 x = 0; x < bmp_width; x++)
+			fb[(bmp_height - 1 - y) * bmp_width + x] = fb_ptr[y + (1279 - x) * 720];
+	}
+
+	memcpy(bitmap + 0x36, fb, pixel_data_size);
 
 	typedef struct _bmp_t
 	{
@@ -69,12 +76,12 @@ int save_fb_to_bmp()
 	bmp->rsvd     = 0;
 	bmp->data_off = 0x36;
 	bmp->hdr_size = 40;
-	bmp->width    = 720;
-	bmp->height   = 1280;
+	bmp->width    = bmp_width;
+	bmp->height   = bmp_height;
 	bmp->planes   = 1;
 	bmp->pxl_bits = 32;
 	bmp->comp     = 0;
-	bmp->img_size = 0x384000;
+	bmp->img_size = pixel_data_size;
 	bmp->res_h    = 2834;
 	bmp->res_v    = 2834;
 	bmp->rsvd2    = 0;
@@ -84,7 +91,6 @@ int save_fb_to_bmp()
 	f_mkdir("sd:/switch");
 	f_mkdir("sd:/switch/screenshot");
 
-	// Generate unique filename with RTC timestamp
 	rtc_time_t time;
 	max77620_rtc_get_time(&time);
 
@@ -92,16 +98,12 @@ int save_fb_to_bmp()
 	s_printf(path, "sd:/switch/screenshot/downgradefixer_%04d%02d%02d_%02d%02d%02d.bmp",
 		time.year, time.month, time.day, time.hour, time.min, time.sec);
 
-	// Save screenshot and log.
 	int res = sd_save_to_file(bitmap, file_size, path);
-
-	// sd_unmount();
 
 	free(bitmap);
 	free(fb);
 
-	// Set timer to 2s.
-	timer = get_tmr_ms() + 2000;
+	timer = get_tmr_ms() + 1000;
 
-    return res;
+	return res;
 }

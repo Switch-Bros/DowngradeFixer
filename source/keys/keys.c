@@ -26,6 +26,7 @@
 #include "../frontend/gui.h"
 #include <gfx_utils.h>
 #include "../gfx/tui.h"
+#include "../hid/hid.h"
 #include "../hos/hos.h"
 #include <libs/fatfs/ff.h>
 #include <libs/nx_savedata/header.h>
@@ -56,6 +57,81 @@ extern hekate_config h_cfg;
 static u32 _key_count = 0, _titlekey_count = 0;
 static u32 start_time, end_time;
 u32 color_idx = 0;
+
+static void keys_draw_notice(const char *msg, u32 color)
+{
+    u32 cx, cy;
+
+    if (!msg)
+        return;
+
+    gfx_con_getpos(&cx, &cy);
+    gfx_con_setcol(color, 1, 0xFF1B1B1B);
+    gfx_con_setpos(UI_NOTIFY_X, UI_NOTIFY_Y);
+    gfx_printf("%s                              ", msg);
+    gfx_con_setpos(cx, cy);
+}
+
+static void keys_clear_notice(void)
+{
+    u32 cx, cy;
+
+    gfx_con_getpos(&cx, &cy);
+    gfx_con_setcol(COLOR_SOFT_WHITE, 1, 0xFF1B1B1B);
+    gfx_con_setpos(UI_NOTIFY_X, UI_NOTIFY_Y);
+    gfx_printf("                                                  ");
+    gfx_con_setpos(cx, cy);
+}
+
+static void keys_take_screenshot(void)
+{
+    int res = save_fb_to_bmp();
+    if (!res)
+        keys_draw_notice("Screenshot saved!", COLOR_CYAN_L);
+    else
+        keys_draw_notice("Screenshot failed!", COLOR_ERROR);
+
+    msleep(1000);
+    keys_clear_notice();
+}
+
+static void keys_wait_for_power_or_screenshot(void)
+{
+    u32 vol_press_start = 0;
+
+    while (true) {
+        Input_t *input = hidRead();
+        if (!(input->buttons || input->power || input->volp || input->volm))
+            break;
+        msleep(10);
+    }
+
+    while (true) {
+        Input_t *input = hidRead();
+
+        if (input->power)
+            return;
+
+        if (input->volp && !input->volm) {
+            if (vol_press_start == 0)
+                vol_press_start = get_tmr_ms();
+            else if (get_tmr_ms() - vol_press_start >= 1000) {
+                keys_take_screenshot();
+                vol_press_start = 0;
+                while (true) {
+                    input = hidRead();
+                    if (!(input->buttons || input->power || input->volp || input->volm))
+                        break;
+                    msleep(10);
+                }
+            }
+        } else {
+            vol_press_start = 0;
+        }
+
+        msleep(10);
+    }
+}
 
 static void _save_key(const char *name, const void *data, u32 len, char *outbuf) {
     if (!key_exists(data))
@@ -441,8 +517,10 @@ int save_mariko_partial_keys(u32 start, u32 count, bool append) {
     }
 
     display_backlight_brightness(h_cfg.backlight, 1000);
-    gfx_clear_partial_grey(0x1B, 32, 1224);
-    gfx_con_setpos(0, 32);
+    gfx_boxGrey(0, 16, 1279, 703, 0x1B);
+    gfx_draw_title_bar("DowngradeFixer Partial Keys");
+    gfx_draw_bottom_bar("Please wait...");
+    gfx_con_setpos(UI_MENU_START_X, UI_MENU_START_Y);
 
     color_idx = 0;
 
@@ -699,8 +777,10 @@ void derive_amiibo_keys() {
     minerva_periodic_training();
 
     display_backlight_brightness(h_cfg.backlight, 1000);
-    gfx_clear_partial_grey(0x1B, 32, 1224);
-    gfx_con_setpos(0, 32);
+    gfx_boxGrey(0, 16, 1279, 703, 0x1B);
+    gfx_draw_title_bar("DowngradeFixer Amiibo Keys");
+    gfx_draw_bottom_bar("PWR: Return   Hold+: Screenshot");
+    gfx_con_setpos(UI_MENU_START_X, UI_MENU_START_Y);
 
     color_idx = 0;
 
@@ -708,7 +788,7 @@ void derive_amiibo_keys() {
 
     if (!key_exists(keys->master_key[0])) {
         minerva_change_freq(FREQ_800);
-        btn_wait();
+        keys_wait_for_power_or_screenshot();
         return;
     }
 
@@ -733,9 +813,9 @@ void derive_amiibo_keys() {
         }
     }
 
-    gfx_printf("\n%kPress a button to return to the menu.", colors[(color_idx++) % 6]);
+    gfx_printf("\n%kPress POWER to return to the menu.", colors[(color_idx++) % 6]);
     minerva_change_freq(FREQ_800);
-    btn_wait();
+    keys_wait_for_power_or_screenshot();
     gfx_clear_grey(0x1B);
 }
 
@@ -743,12 +823,10 @@ void dump_keys() {
     minerva_change_freq(FREQ_1600);
 
     display_backlight_brightness(h_cfg.backlight, 1000);
-    gfx_clear_grey(0x1B);
-    gfx_con_setpos(0, 0);
-
-    gfx_printf("%k╔══════════════════════════════════════╗\n", COLOR_GREY_M);
-    gfx_printf("║  %kDowngradeFixer%k v%d.%d.%d            ║\n", COLOR_CYAN_L, COLOR_GREY_M, LP_VER_MJ, LP_VER_MN, LP_VER_BF);
-    gfx_printf("╚══════════════════════════════════════╝%k\n\n", COLOR_SOFT_WHITE);
+    gfx_boxGrey(0, 16, 1279, 703, 0x1B);
+    gfx_draw_title_bar("DowngradeFixer Keys");
+    gfx_draw_bottom_bar("PWR: Return   Hold+: Screenshot");
+    gfx_con_setpos(UI_MENU_START_X, UI_MENU_START_Y);
 
     _key_count = 0;
     _titlekey_count = 0;
@@ -771,18 +849,8 @@ void dump_keys() {
     }
 
     minerva_change_freq(FREQ_800);
-    gfx_printf("\n%kPress VOL+ to save a screenshot\n or another button to return to the menu.\n\n", colors[(color_idx++) % 6]);
-    u8 btn = btn_wait();
-    if (btn == BTN_VOL_UP) {
-        int res = save_fb_to_bmp();
-        if (!res) {
-            gfx_printf("%kScreenshot sd:/switch/downgradefixer.bmp saved.", colors[(color_idx++) % 6]);
-        } else {
-            EPRINTF("Screenshot failed.");
-        }
-        gfx_printf("\n%kPress a button to return to the menu.", colors[(color_idx++) % 6]);
-        btn_wait();
-    }
+    gfx_printf("\n%kPress POWER to return to the menu.\n\n", colors[(color_idx++) % 6]);
+    keys_wait_for_power_or_screenshot();
     gfx_clear_grey(0x1B);
 }
 

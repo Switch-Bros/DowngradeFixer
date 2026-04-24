@@ -17,13 +17,131 @@
 
 #include <display/di.h>
 #include "tui.h"
+#include "../frontend/gui.h"
+#include "../hid/hid.h"
 #include "../config.h"
 #include <power/max17050.h>
-#include <utils/btn.h>
 #include <utils/util.h>
-#include <libs/fatfs/ff.h>
+#include <utils/sprintf.h>
 
 extern hekate_config h_cfg;
+
+static const char *tui_bottom_legend = "D-pad/Vol : Move, A/PWR:Select   Hold+: Screenshot";
+
+static void tui_draw_layout(void)
+{
+	char title[64];
+	s_printf(title, "DowngradeFixer %d.%d.%d", LP_VER_MJ, LP_VER_MN, LP_VER_BF);
+
+	gfx_boxGrey(0, 16, 1279, 703, 0x1B);
+	gfx_draw_title_bar(title);
+	gfx_draw_bottom_bar(tui_bottom_legend);
+}
+
+static void tui_draw_menu_entry(menu_t *menu, int entry_idx, bool selected)
+{
+	int y = UI_MENU_START_Y + (entry_idx * UI_MENU_SPACING);
+
+	gfx_boxGrey(0, y, 1279, y + UI_MENU_SPACING - 1, 0x1B);
+	gfx_con_setpos(UI_MENU_START_X, y);
+
+	if (selected)
+		gfx_con_setcol(0xFF1B1B1B, 1, COLOR_SOFT_WHITE);
+	else
+		gfx_con_setcol(COLOR_SOFT_WHITE, 1, 0xFF1B1B1B);
+
+	if (menu->ents[entry_idx].type != MENT_CHGLINE)
+	{
+		if (selected)
+			gfx_printf(" %s", menu->ents[entry_idx].caption);
+		else
+			gfx_printf("%k %s", menu->ents[entry_idx].color, menu->ents[entry_idx].caption);
+	}
+	if (menu->ents[entry_idx].type == MENT_MENU)
+		gfx_printf("%k...", 0xFF0099EE);
+}
+
+static void tui_draw_notice(const char *msg, u32 color)
+{
+	u32 cx, cy;
+
+	if (!msg)
+		return;
+
+	gfx_con_getpos(&cx, &cy);
+	gfx_con_setcol(color, 1, 0xFF1B1B1B);
+	gfx_con_setpos(UI_NOTIFY_X, UI_NOTIFY_Y);
+	gfx_printf("%s                              ", msg);
+	gfx_con_setpos(cx, cy);
+}
+
+static void tui_clear_notice(void)
+{
+	u32 cx, cy;
+
+	gfx_con_getpos(&cx, &cy);
+	gfx_con_setcol(COLOR_SOFT_WHITE, 1, 0xFF1B1B1B);
+	gfx_con_setpos(UI_NOTIFY_X, UI_NOTIFY_Y);
+	gfx_printf("                                                  ");
+	gfx_con_setpos(cx, cy);
+}
+
+static void tui_take_screenshot(void)
+{
+	int res = save_fb_to_bmp();
+	if (!res)
+		tui_draw_notice("Screenshot saved!", COLOR_CYAN_L);
+	else
+		tui_draw_notice("Screenshot failed!", COLOR_ERROR);
+
+	msleep(1000);
+	tui_clear_notice();
+
+	if (h_cfg.emummc_force_disable)
+		tui_draw_notice("No emuMMC config found.", COLOR_RED_D);
+}
+
+static int tui_next_selectable(menu_t *menu, int idx, int cnt, bool forward)
+{
+	do
+	{
+		if (forward)
+			idx = (idx < (cnt - 1)) ? idx + 1 : 0;
+		else
+			idx = (idx > 0) ? idx - 1 : cnt - 1;
+	} while (menu->ents[idx].type == MENT_CAPTION ||
+		menu->ents[idx].type == MENT_CHGLINE);
+
+	return idx;
+}
+
+static u32 tui_input_state(const Input_t *input)
+{
+	u32 state = 0;
+
+	if (input->a)
+		state |= BIT(0);
+	if (input->down)
+		state |= BIT(1);
+	if (input->up)
+		state |= BIT(2);
+	if (input->left)
+		state |= BIT(3);
+	if (input->right)
+		state |= BIT(4);
+	if (input->rDown)
+		state |= BIT(5);
+	if (input->rUp)
+		state |= BIT(6);
+	if (input->volp)
+		state |= BIT(7);
+	if (input->volm)
+		state |= BIT(8);
+	if (input->power)
+		state |= BIT(9);
+
+	return state;
+}
 
 void tui_sbar(bool force_update)
 {
@@ -40,26 +158,20 @@ void tui_sbar(bool force_update)
 	sbar_time_keeping = get_tmr_s();
 
 	u32 battPercent = 0;
-	int battVoltCurr = 0;
-
 	gfx_con_getpos(&cx, &cy);
-	gfx_con_setpos(0,  1260);
+	gfx_con_setpos(1050, 704);
 
 	max17050_get_property(MAX17050_RepSOC, (int *)&battPercent);
-	max17050_get_property(MAX17050_VCELL, &battVoltCurr);
 
-	gfx_clear_partial_grey(0x30, 1256, 24);
-	gfx_printf("%K%k Battery: %d.%d%% (%d mV) - Charge:", 0xFF303030, 0xFF888888,
-		(battPercent >> 8) & 0xFF, (battPercent & 0xFF) / 26, battVoltCurr);
+	u8 saved_fillbg = gfx_con.fillbg;
+	u32 saved_bgcol = gfx_con.bgcol;
 
-	max17050_get_property(MAX17050_Current, &battVoltCurr);
+	gfx_printf("%K%k Batt: %d%%", 0xFF3D3D3D, 0xFF00D8FF,
+		battPercent >> 8);
 
-	if (battVoltCurr >= 0)
-		gfx_printf(" %k+%d mA%k%K\n",
-			0xFF008800, battVoltCurr / 1000, 0xFFCCCCCC, 0xFF1B1B1B);
-	else
-		gfx_printf(" %k-%d mA%k%K\n",
-			0xFF880000, (~battVoltCurr) / 1000, 0xFFCCCCCC, 0xFF1B1B1B);
+	gfx_con.fillbg = saved_fillbg;
+	gfx_con.bgcol = saved_bgcol;
+
 	gfx_con.fntsz = prevFontSize;
 	gfx_con_setpos(cx, cy);
 }
@@ -86,25 +198,18 @@ void tui_pbar(int x, int y, u32 val, u32 fgcol, u32 bgcol)
 
 	gfx_con_setpos(cx, cy);
 
-	// Update status bar.
 	tui_sbar(false);
 }
 
 void *tui_do_menu(menu_t *menu)
 {
-	int idx = 0, prev_idx = 0, cnt = 0x7FFFFFFF;
-
-	gfx_clear_partial_grey(0x1B, 0, 1256);
-	tui_sbar(true);
+	int idx = 0, prev_idx = -1, cnt = 0x7FFFFFFF;
+	int need_full_redraw = 1;
+	u32 btn_last = tui_input_state(hidRead());
+	u32 vol_press_start = 0;
 
 	while (true)
 	{
-		gfx_con_setcol(0xFFCCCCCC, 1, 0xFF1B1B1B);
-		gfx_con_setpos(menu->x, menu->y);
-		gfx_printf("[%kDowngradeFixer%k v%d.%d.%d%k]\n\n",
-			COLOR_WHITE, COLOR_WHITE, LP_VER_MJ, LP_VER_MN, LP_VER_BF, COLOR_SOFT_WHITE);
-
-		// Skip caption or seperator lines selection.
 		while (menu->ents[idx].type == MENT_CAPTION ||
 			menu->ents[idx].type == MENT_CHGLINE)
 		{
@@ -129,79 +234,61 @@ void *tui_do_menu(menu_t *menu)
 		}
 		prev_idx = idx;
 
-		// Draw the menu.
-		for (cnt = 0; menu->ents[cnt].type != MENT_END; cnt++)
+		if (need_full_redraw)
 		{
-			if (cnt == idx)
-				gfx_con_setcol(0xFF1B1B1B, 1, 0xFFCCCCCC);
-			else
-				gfx_con_setcol(0xFFCCCCCC, 1, 0xFF1B1B1B);
-			if (menu->ents[cnt].type != MENT_CHGLINE)
-			{
-				if (cnt == idx)
-					gfx_printf(" %s", menu->ents[cnt].caption);
-				else
-					gfx_printf("%k %s", menu->ents[cnt].color, menu->ents[cnt].caption);
-			}
-			if(menu->ents[cnt].type == MENT_MENU)
-				gfx_printf("%k...", 0xFF0099EE);
-			gfx_printf(" \n");
-		}
-		gfx_con_setcol(0xFFCCCCCC, 1, 0xFF1B1B1B);
-		gfx_putc('\n');
+			tui_draw_layout();
 
-		// Print help and battery status.
-		gfx_con_setpos(0,  1127);
-		if (h_cfg.emummc_force_disable)
-			gfx_printf("%kNo emuMMC config found.\n", COLOR_RED_D);
-		gfx_con_setpos(0,  1191);
-		gfx_printf("%k VOL: Move | PWR: Select | VOL+-: Screenshot%k", COLOR_GREY_M, COLOR_SOFT_WHITE);
+			for (cnt = 0; menu->ents[cnt].type != MENT_END; cnt++)
+				tui_draw_menu_entry(menu, cnt, cnt == idx);
+
+			if (h_cfg.emummc_force_disable)
+				tui_draw_notice("No emuMMC config found.", COLOR_RED_D);
+
+			tui_sbar(true);
+			need_full_redraw = 0;
+		}
 
 		display_backlight_brightness(h_cfg.backlight, 1000);
 
-		// Wait for user command.
-		u32 btn = btn_wait();
+		Input_t *input = hidRead();
+		u32 btn = tui_input_state(input);
 
-		// Check for VOL+ and VOL- pressed together for screenshot
-		if (btn == (BTN_VOL_UP | BTN_VOL_DOWN))
+		if (btn == btn_last)
 		{
-			// Create screenshot directory if it doesn't exist
-			f_mkdir("sd:/switch");
-			f_mkdir("sd:/switch/screenshot");
-
-			int save_fb_to_bmp();
-			int res = save_fb_to_bmp();
-			u32 cx, cy;
-			gfx_con_getpos(&cx, &cy);
-			gfx_con_setpos(0, 1191);
-			if (!res) {
-				gfx_printf("%kScreenshot saved to sd:/switch/screenshot/%k           ", COLOR_CYAN_L, COLOR_SOFT_WHITE);
-			} else {
-				gfx_printf("%kScreenshot failed!%k                                     ", COLOR_ERROR, COLOR_SOFT_WHITE);
+			if (input->volp && !input->volm && !input->power)
+			{
+				if (vol_press_start == 0)
+					vol_press_start = get_tmr_ms();
+				else if (get_tmr_ms() - vol_press_start >= 1000)
+				{
+					vol_press_start = 0;
+					btn_last = 0;
+					tui_take_screenshot();
+					while (tui_input_state(hidRead()))
+						msleep(10);
+				}
 			}
-			msleep(2000);
-			gfx_con_setpos(0, 1191);
-			gfx_printf("%k  VOL: Move  |  PWR: Select  |  VOL+&-: Screenshot%k", COLOR_GREY_M, COLOR_SOFT_WHITE);
-			gfx_con_setpos(cx, cy);
-			gfx_clear_partial_grey(0x1B, 0, 1256);
+			else
+			{
+				vol_press_start = 0;
+			}
+
+			msleep(10);
+			tui_sbar(false);
 			continue;
 		}
 
-		if (btn & BTN_VOL_DOWN && idx < (cnt - 1))
-			idx++;
-		else if (btn & BTN_VOL_DOWN && idx == (cnt - 1))
+		btn_last = btn;
+
+		if (!btn)
 		{
-			idx = 0;
-			prev_idx = -1;
+			vol_press_start = 0;
+			msleep(10);
+			tui_sbar(false);
+			continue;
 		}
-		if (btn & BTN_VOL_UP && idx > 0)
-			idx--;
-		else if (btn & BTN_VOL_UP && idx == 0)
-		{
-			idx = cnt - 1;
-			prev_idx = cnt;
-		}
-		if (btn & BTN_POWER)
+
+		if (input->a)
 		{
 			ment_t *ent = &menu->ents[idx];
 			switch (ent->type)
@@ -211,13 +298,10 @@ void *tui_do_menu(menu_t *menu)
 				break;
 			case MENT_MENU:
 				return tui_do_menu(ent->menu);
-				break;
 			case MENT_DATA:
 				return ent->data;
-				break;
 			case MENT_BACK:
 				return NULL;
-				break;
 			case MENT_HDLR_RE:
 				ent->handler(ent);
 				if (!ent->data)
@@ -227,8 +311,25 @@ void *tui_do_menu(menu_t *menu)
 				break;
 			}
 			gfx_con.fntsz = 16;
-			gfx_clear_partial_grey(0x1B, 0, 1256);
+			need_full_redraw = 1;
 		}
+		else if (input->down || input->rDown || input->right)
+		{
+			int old_idx = idx;
+			idx = tui_next_selectable(menu, idx, cnt, true);
+			prev_idx = old_idx;
+			tui_draw_menu_entry(menu, old_idx, false);
+			tui_draw_menu_entry(menu, idx, true);
+		}
+		else if (input->up || input->rUp || input->left)
+		{
+			int old_idx = idx;
+			idx = tui_next_selectable(menu, idx, cnt, false);
+			prev_idx = old_idx;
+			tui_draw_menu_entry(menu, old_idx, false);
+			tui_draw_menu_entry(menu, idx, true);
+		}
+
 		tui_sbar(false);
 	}
 

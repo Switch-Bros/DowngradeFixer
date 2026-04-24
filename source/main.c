@@ -21,8 +21,10 @@
 
 #include "config.h"
 #include <display/di.h>
+#include "frontend/gui.h"
 #include <gfx_utils.h>
 #include "gfx/tui.h"
+#include "hid/hid.h"
 #include "keys/keys.h"
 #include <libs/fatfs/ff.h>
 #include <mem/heap.h>
@@ -71,6 +73,9 @@ volatile nyx_storage_t *nyx_str = (nyx_storage_t *)NYX_STORAGE_ADDR;
 #define  CBFS_DRAM_MAGIC    0x4452414D // "DRAM"
 
 static void *coreboot_addr;
+
+static void take_screen_screenshot(void);
+static void wait_for_power_or_screenshot(void);
 
 void reloc_patcher(u32 payload_dst, u32 payload_src, u32 payload_size)
 {
@@ -282,7 +287,7 @@ out:
 	sd_end();
 	free(dir);
 
-	btn_wait();
+	hidWait();
 }
 
 void launch_hekate()
@@ -293,25 +298,12 @@ void launch_hekate()
 	else
 	{
 		gfx_clear_grey(0x1B);
+		gfx_draw_bottom_bar("PWR: Return   Hold+: Screenshot");
+		tui_sbar(true);
 		gfx_con_setpos(0, 0);
 		EPRINTF("bootloader/update.bin not found!");
-		gfx_printf("\n%kPress any button to return to menu.", colors[0]);
-		btn_wait();
-	}
-}
-
-void launch_reboot_payload()
-{
-	sd_mount();
-	if (!f_stat("payload.bin", NULL))
-		launch_payload("payload.bin", false);
-	else
-	{
-		gfx_clear_grey(0x1B);
-		gfx_con_setpos(0, 0);
-		EPRINTF("payload.bin not found on SD root!");
-		gfx_printf("\n%kPress any button to return to menu.", colors[0]);
-		btn_wait();
+		gfx_printf("\n%kPress POWER to return to menu.", colors[0]);
+		wait_for_power_or_screenshot();
 	}
 }
 
@@ -330,13 +322,108 @@ ment_t ment_top[] = {
 	MDEF_HANDLER("Fix Both", fix_downgrade_both, COLOR_TURQUOISE),
 	MDEF_CAPTION("---------------", COLOR_WHITE),
 	MDEF_HANDLER("Reboot to Hekate", launch_hekate, COLOR_TURQUOISE),
-	MDEF_HANDLER("Reboot to Payload.bin", launch_reboot_payload, COLOR_TURQUOISE),
 	MDEF_CAPTION("---------------", COLOR_WHITE),
-	MDEF_HANDLER_EX("Power off", &STATE_POWER_OFF, power_set_state_ex, COLOR_TURQUOISE),
+	MDEF_HANDLER_EX("Power off", &STATE_POWER_OFF, power_set_state_ex, COLOR_RED),
 	MDEF_END()
 };
 
 menu_t menu_top = { ment_top, NULL, 0, 0 };
+
+static void draw_screen_notice(const char *msg, u32 color)
+{
+	u32 cx, cy;
+
+	if (!msg)
+		return;
+
+	gfx_con_getpos(&cx, &cy);
+	gfx_con_setcol(color, 1, 0xFF1B1B1B);
+	gfx_con_setpos(UI_NOTIFY_X, UI_NOTIFY_Y);
+	gfx_printf("%s                              ", msg);
+	gfx_con_setpos(cx, cy);
+}
+
+static void clear_screen_notice(void)
+{
+	u32 cx, cy;
+
+	gfx_con_getpos(&cx, &cy);
+	gfx_con_setcol(COLOR_SOFT_WHITE, 1, 0xFF1B1B1B);
+	gfx_con_setpos(UI_NOTIFY_X, UI_NOTIFY_Y);
+	gfx_printf("                                                  ");
+	gfx_con_setpos(cx, cy);
+}
+
+static void take_screen_screenshot(void)
+{
+	int res = save_fb_to_bmp();
+	if (!res)
+		draw_screen_notice("Screenshot saved!", COLOR_CYAN_L);
+	else
+		draw_screen_notice("Screenshot failed!", COLOR_ERROR);
+
+	msleep(1000);
+	clear_screen_notice();
+}
+
+static void wait_for_power_or_screenshot(void)
+{
+	u32 vol_press_start = 0;
+
+	while (true)
+	{
+		Input_t *input = hidRead();
+		if (!(input->buttons || input->power || input->volp || input->volm))
+			break;
+		msleep(10);
+	}
+
+	while (true)
+	{
+		Input_t *input = hidRead();
+
+		if (input->power)
+			return;
+
+		if (input->volp && !input->volm)
+		{
+			if (vol_press_start == 0)
+				vol_press_start = get_tmr_ms();
+			else if (get_tmr_ms() - vol_press_start >= 1000)
+			{
+				take_screen_screenshot();
+				vol_press_start = 0;
+				while (true)
+				{
+					input = hidRead();
+					if (!(input->buttons || input->power || input->volp || input->volm))
+						break;
+					msleep(10);
+				}
+			}
+		}
+		else
+		{
+			vol_press_start = 0;
+		}
+
+		msleep(10);
+	}
+}
+
+static void draw_status_screen(const char *subtitle)
+{
+	char title[64];
+	s_printf(title, "DowngradeFixer %d.%d.%d", LP_VER_MJ, LP_VER_MN, LP_VER_BF);
+
+	gfx_boxGrey(0, 16, 1279, 703, 0x1B);
+	gfx_draw_title_bar(title);
+	gfx_draw_bottom_bar("Please wait...");
+	gfx_con_setcol(COLOR_SOFT_WHITE, 1, 0xFF1B1B1B);
+	gfx_con_setpos(UI_MENU_START_X, UI_MENU_START_Y);
+	if (subtitle)
+		gfx_printf("%k%s\n\n", COLOR_CYAN_L, subtitle);
+}
 
 void grey_out_menu_item(ment_t *menu)
 {
@@ -410,14 +497,7 @@ static bool delete_save_from_nand(bool is_sysnand)
 
 void fix_downgrade_sysnand()
 {
-	gfx_clear_grey(0x1B);
-	gfx_con_setpos(0, 0);
-
-	gfx_printf("%k╔══════════════════════════════════════╗\n", COLOR_GREY_M);
-	gfx_printf("║  %kDowngradeFixer%k v%d.%d.%d            ║\n", COLOR_CYAN_L, COLOR_GREY_M, LP_VER_MJ, LP_VER_MN, LP_VER_BF);
-	gfx_printf("╚══════════════════════════════════════╝%k\n\n", COLOR_SOFT_WHITE);
-
-	gfx_printf("%kProcessing SysMMC...\n\n", colors[0]);
+	draw_status_screen("Processing SysMMC");
 
 	// Save original emummc state
 	bool orig_emummc_force_disable = h_cfg.emummc_force_disable;
@@ -446,8 +526,10 @@ out_restore:
 	h_cfg.emummc_force_disable = orig_emummc_force_disable;
 	emu_cfg.enabled = orig_emu_enabled;
 
-	gfx_printf("\n%kPress any button to return to menu.", colors[2]);
-	btn_wait();
+	gfx_draw_bottom_bar("PWR: Return   Hold+: Screenshot");
+	tui_sbar(true);
+	gfx_printf("\n%kPress POWER to return to menu.", colors[2]);
+	wait_for_power_or_screenshot();
 }
 
 void fix_downgrade_emunand()
@@ -456,22 +538,16 @@ void fix_downgrade_emunand()
 	bool emummc_available = (emu_cfg.sector != 0 || emu_cfg.path != NULL);
 
 	if (!emummc_available) {
-		gfx_clear_grey(0x1B);
-		gfx_con_setpos(0, 0);
+		draw_status_screen("Processing EmuMMC");
 		EPRINTF("EmuNAND not available!");
-		gfx_printf("\n%kPress any button to return to menu.", colors[0]);
-		btn_wait();
+		gfx_draw_bottom_bar("PWR: Return   Hold+: Screenshot");
+		tui_sbar(true);
+		gfx_printf("\n%kPress POWER to return to menu.", colors[0]);
+		wait_for_power_or_screenshot();
 		return;
 	}
 
-	gfx_clear_grey(0x1B);
-	gfx_con_setpos(0, 0);
-
-	gfx_printf("%k╔══════════════════════════════════════╗\n", COLOR_GREY_M);
-	gfx_printf("║  %kDowngradeFixer%k v%d.%d.%d            ║\n", COLOR_CYAN_L, COLOR_GREY_M, LP_VER_MJ, LP_VER_MN, LP_VER_BF);
-	gfx_printf("╚══════════════════════════════════════╝%k\n\n", COLOR_SOFT_WHITE);
-
-	gfx_printf("%kProcessing EmuMMC...\n\n", colors[0]);
+	draw_status_screen("Processing EmuMMC");
 
 	// Save original emummc state
 	bool orig_emummc_force_disable = h_cfg.emummc_force_disable;
@@ -500,20 +576,15 @@ out_restore:
 	h_cfg.emummc_force_disable = orig_emummc_force_disable;
 	emu_cfg.enabled = orig_emu_enabled;
 
-	gfx_printf("\n%kPress any button to return to menu.", colors[2]);
-	btn_wait();
+	gfx_draw_bottom_bar("PWR: Return   Hold+: Screenshot");
+	tui_sbar(true);
+	gfx_printf("\n%kPress POWER to return to menu.", colors[2]);
+	wait_for_power_or_screenshot();
 }
 
 void fix_downgrade_both()
 {
-	gfx_clear_grey(0x1B);
-	gfx_con_setpos(0, 0);
-
-	gfx_printf("%k╔══════════════════════════════════════╗\n", COLOR_GREY_M);
-	gfx_printf("║  %kDowngradeFixer%k v%d.%d.%d            ║\n", COLOR_CYAN_L, COLOR_GREY_M, LP_VER_MJ, LP_VER_MN, LP_VER_BF);
-	gfx_printf("╚══════════════════════════════════════╝%k\n\n", COLOR_SOFT_WHITE);
-
-	gfx_printf("%kProcessing both NANDs...\n\n", colors[0]);
+	draw_status_screen("Processing Both NANDs");
 
 	// Save original emummc state
 	bool orig_emummc_force_disable = h_cfg.emummc_force_disable;
@@ -555,8 +626,10 @@ out_restore:
 	h_cfg.emummc_force_disable = orig_emummc_force_disable;
 	emu_cfg.enabled = orig_emu_enabled;
 
-	gfx_printf("\n%kPress any button to return to menu.", colors[3]);
-	btn_wait();
+	gfx_draw_bottom_bar("PWR: Return   Hold+: Screenshot");
+	tui_sbar(true);
+	gfx_printf("\n%kPress POWER to return to menu.", colors[3]);
+	wait_for_power_or_screenshot();
 }
 
 extern void pivot_stack(u32 stack_top);
@@ -595,6 +668,7 @@ void ipl_main()
 	gfx_con_init();
 
 	display_backlight_pwm_init();
+	hidInit();
 
 	// Overclock BPMP.
 	bpmp_clk_rate_set(h_cfg.t210b01 ? BPMP_CLK_DEFAULT_BOOST : BPMP_CLK_LOWER_BOOST);
@@ -616,12 +690,6 @@ void ipl_main()
 	if (f_stat("bootloader/update.bin", NULL))
 	{
 		grey_out_menu_item(&ment_top[4]); // Reboot to Hekate
-	}
-
-	// Grey out Payload.bin reboot if not found.
-	if (f_stat("payload.bin", NULL))
-	{
-		grey_out_menu_item(&ment_top[5]); // Reboot to Payload.bin
 	}
 
 	minerva_change_freq(FREQ_800);

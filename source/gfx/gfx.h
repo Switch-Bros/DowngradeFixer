@@ -21,6 +21,7 @@
 #define _GFX_H_
 
 #include <utils/types.h>
+#include <stdarg.h>
 
 #define EPRINTF(text) gfx_printf("%k"text"%k\n", 0xFFFF0000, 0xFFCCCCCC)
 #define EPRINTFARGS(text, args...) gfx_printf("%k"text"%k\n", 0xFFFF0000, args, 0xFFCCCCCC)
@@ -49,6 +50,16 @@ typedef struct _gfx_con_t
 	bool mute;
 } gfx_con_t;
 
+#define YLEFT 1279
+
+// Landscape-style UI layout tuned for the Switch's 1280x720 visible output.
+#define UI_MENU_START_X    5
+#define UI_MENU_START_Y    32
+#define UI_MENU_SPACING    24
+#define UI_NOTIFY_X        5
+#define UI_NOTIFY_Y        680
+#define UI_BAR_COLOR       0xFF3D3D3D
+
 // Global gfx console and context.
 extern gfx_ctxt_t gfx_ctxt;
 extern gfx_con_t gfx_con;
@@ -64,10 +75,15 @@ void gfx_con_setpos(u32 x, u32 y);
 void gfx_putc(char c);
 void gfx_puts(const char *s);
 void gfx_printf(const char *fmt, ...);
+void gfx_vprintf(const char *fmt, va_list ap);
 void gfx_hexdump(u32 base, const void *buf, u32 len);
 void gfx_hexdiff(u32 base, const void *buf1, const void *buf2, u32 len);
+void gfx_puts_limit(const char *s, u32 limit);
+void gfx_puts_small(const char *s);
+void gfx_putc_small(char c);
 
 void gfx_set_pixel(u32 x, u32 y, u32 color);
+void gfx_set_pixel_horz(int x, int y, u32 color);
 void gfx_line(int x0, int y0, int x1, int y1, u32 color);
 void gfx_put_small_sep();
 void gfx_put_big_sep();
@@ -75,5 +91,9 @@ void gfx_set_rect_grey(const u8 *buf, u32 size_x, u32 size_y, u32 pos_x, u32 pos
 void gfx_set_rect_rgb(const u8 *buf, u32 size_x, u32 size_y, u32 pos_x, u32 pos_y);
 void gfx_set_rect_argb(const u32 *buf, u32 size_x, u32 size_y, u32 pos_x, u32 pos_y);
 void gfx_render_bmp_argb(const u32 *buf, u32 size_x, u32 size_y, u32 pos_x, u32 pos_y);
+void gfx_box(int x0, int y0, int x1, int y1, u32 color);
+void gfx_boxGrey(int x0, int y0, int x1, int y1, u8 shade);
+void gfx_draw_title_bar(const char *title);
+void gfx_draw_bottom_bar(const char *legend);
 
 #endif
